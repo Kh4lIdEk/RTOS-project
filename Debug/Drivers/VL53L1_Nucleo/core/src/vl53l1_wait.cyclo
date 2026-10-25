@@ -1,0 +1,10 @@
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:89:14:VL53L1_wait_for_boot_completion	5
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:137:14:VL53L1_wait_for_firmware_ready	7
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:202:14:VL53L1_wait_for_range_completion	5
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:249:14:VL53L1_wait_for_test_completion	5
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:298:14:VL53L1_is_boot_complete	2
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:342:14:VL53L1_is_firmware_ready	1
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:367:14:VL53L1_is_new_data_ready	3
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:417:14:VL53L1_poll_for_boot_completion	3
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:459:14:VL53L1_poll_for_firmware_ready	9
+../Drivers/VL53L1_Nucleo/core/src/vl53l1_wait.c:517:14:VL53L1_poll_for_range_completion	2
