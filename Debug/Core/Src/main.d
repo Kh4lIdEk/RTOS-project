@@ -33,6 +33,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_spi_ex.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tim.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tim_ex.h \
+ ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tsc.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.h \
@@ -58,20 +59,20 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_api_core.h \
  ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/vl53l1_platform.h \
  ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_ll_def.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_error_codes.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/platform/inc/vl53l1_types.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_error_exceptions.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_ll_device.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_user_config.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_register_structs.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/core/inc/vl53l1_register_map.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_config.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_defines.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\vl53l1_error_codes.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/platform/inc/vl53l1_types.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\vl53l1_error_exceptions.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\vl53l1_ll_device.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_user_config.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\vl53l1_register_structs.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/core/inc/vl53l1_register_map.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_config.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_defines.h \
  ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_log.h \
- ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_ipp_imports.h \
- ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_user_data.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_def.h \
- C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/core/inc/vl53l1_ll_def.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_ipp_imports.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_data.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\../../../VL53L1_Nucleo/core/inc/vl53l1_def.h \
+ C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_ll_def.h \
  ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_api_strings.h \
  ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_def.h \
  ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_preset_setup.h
@@ -110,6 +111,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_spi_ex.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tim.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tim_ex.h:
+../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tsc.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.h:
@@ -137,20 +139,20 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_api_core.h:
 ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/vl53l1_platform.h:
 ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_ll_def.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_error_codes.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/platform/inc/vl53l1_types.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_error_exceptions.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_ll_device.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_user_config.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_register_structs.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/core/inc/vl53l1_register_map.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_config.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_defines.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\vl53l1_error_codes.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/platform/inc/vl53l1_types.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\vl53l1_error_exceptions.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\vl53l1_ll_device.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_user_config.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\vl53l1_register_structs.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/core/inc/vl53l1_register_map.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_config.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_defines.h:
 ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_log.h:
-../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_ipp_imports.h:
-../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/platform/inc/../../../VL53L1_Nucleo/platform/inc/vl53l1_platform_user_data.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\vl53l1_def.h:
-C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil\Drivers\VL53L1_Nucleo\core\inc\../../../VL53L1_Nucleo/core/inc/vl53l1_ll_def.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_ipp_imports.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\vl53l1_platform_user_data.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\../../../VL53L1_Nucleo/core/inc/vl53l1_def.h:
+C:\Users\micro\STM32CubeIDE\workspace_1.15.0\Projet_Reveil_2_11\Drivers\VL53L1_Nucleo\platform\inc\../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_ll_def.h:
 ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_api_strings.h:
 ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_def.h:
 ../Core/Src/../../Drivers/VL53L1_Nucleo/core/inc/../../../VL53L1_Nucleo/core/inc/vl53l1_preset_setup.h:

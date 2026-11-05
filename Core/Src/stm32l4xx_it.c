@@ -59,6 +59,7 @@ extern DMA_HandleTypeDef hdma_adc1;
 extern CAN_HandleTypeDef hcan1;
 extern UART_HandleTypeDef hlpuart1;
 extern DMA_HandleTypeDef hdma_tim3_ch4_up;
+extern TSC_HandleTypeDef htsc;
 extern TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN EV */
@@ -247,6 +248,20 @@ void LPUART1_IRQHandler(void)
   /* USER CODE BEGIN LPUART1_IRQn 1 */
 
   /* USER CODE END LPUART1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Touch sense controller interrupt.
+  */
+void TSC_IRQHandler(void)
+{
+  /* USER CODE BEGIN TSC_IRQn 0 */
+
+  /* USER CODE END TSC_IRQn 0 */
+  HAL_TSC_IRQHandler(&htsc);
+  /* USER CODE BEGIN TSC_IRQn 1 */
+
+  /* USER CODE END TSC_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */

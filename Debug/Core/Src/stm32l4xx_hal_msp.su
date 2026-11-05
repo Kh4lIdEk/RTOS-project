@@ -12,3 +12,5 @@
 ../Core/Src/stm32l4xx_hal_msp.c:559:6:HAL_TIM_Base_MspInit	32	static
 ../Core/Src/stm32l4xx_hal_msp.c:630:6:HAL_TIM_MspPostInit	48	static
 ../Core/Src/stm32l4xx_hal_msp.c:703:6:HAL_TIM_Base_MspDeInit	16	static
+../Core/Src/stm32l4xx_hal_msp.c:762:6:HAL_TSC_MspInit	48	static
+../Core/Src/stm32l4xx_hal_msp.c:820:6:HAL_TSC_MspDeInit	16	static

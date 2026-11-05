@@ -28,7 +28,7 @@
 #include "../../Drivers/VL53L1_Nucleo/core/inc/vl53l1_api.h"
 #include <stdbool.h>
 #include <stdio.h>
-
+#include <stdarg.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -67,6 +67,37 @@
 
 /* ---- SGP40 ---- */
 #define SGP40_I2C_ADDR          (0x59 << 1)
+
+/* ---- Touch keys (TSC) -> GPIO LEDs ---- */
+#define TOUCH_N_KEYS        3U
+#define TOUCH_PERIOD_MS     20U
+#define TOUCH_CAL_SAMPLES   16U
+#define TOUCH_DELTA_PCT     12      /* touched  if value < baseline - 12 % */
+#define TOUCH_RELEASE_PCT    6      /* released if value > baseline -  6 % */
+#define TOUCH_DEBUG         0       /* 1 = print raw values on the console */
+
+/* ---- Motor ---- */
+#define MOTOR_PWM_MAX        255U     /* = TIM2 ARR                                        */
+#define MOTOR_MIN_DUTY        80U     /* below this the motor stalls: tune on the bench    */
+#define MOTOR_TEMP_ON_C      26.0f    /* motor starts above this temperature               */
+#define MOTOR_TEMP_HYST_C     1.0f    /* ...and stops below (ON - HYST)                    */
+#define MOTOR_TEMP_FULL_C    38.0f    /* full speed from this temperature                  */
+#define MOTOR_VOC_BAD        400      /* VOC index above = bad air (same as the reference) */
+#define MOTOR_VOC_OK         390      /* back to normal below this (hysteresis)            */
+#define MOTOR_PERIOD_MS      100U     /* control loop period                               */
+
+/* ---- Sleep quality over CAN (2 sensor boards, 2 ToF each) ---- */
+#define CAN_ID_SLEEP_NODE1      0x21U   /* sensor board A */
+#define CAN_ID_SLEEP_NODE2      0x22U   /* sensor board B */
+#define SLEEP_N_NODES           2U
+#define SLEEP_NODE_TIMEOUT_MS   3000U   /* a board silent for longer is ignored */
+
+/* CAN1 clock is PCLK1 = 80 MHz in SystemClock_Config().
+ * With 1 + 13 + 2 = 16 time quanta, Prescaler=10 gives 500 kbit/s.
+ * IMPORTANT: configure every board on this bus to the same bitrate.
+ * Use 20 for 250 kbit/s, or calculate the value for your actual bus rate.
+ */
+#define CAN_PRESCALER           10U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -93,6 +124,8 @@ TIM_HandleTypeDef htim8;
 TIM_HandleTypeDef htim15;
 DMA_HandleTypeDef hdma_tim3_ch4_up;
 
+TSC_HandleTypeDef htsc;
+
 osThreadId defaultTaskHandle;
 /* USER CODE BEGIN PV */
 /* ===== Types ============================================================== */
@@ -107,7 +140,7 @@ typedef enum { ALARM_IDLE = 0, ALARM_RINGING, ALARM_SNOOZE } AlarmState;
 
 typedef struct { uint16_t freq; uint16_t duration; } Note;      /* Hz, ms */
 
-typedef struct { uint16_t movementCount; uint8_t sleepQuality; } CAN_SleepData_t;
+typedef struct { uint8_t nodeId; uint16_t movementCount; uint8_t sleepQuality; } CAN_SleepData_t;
 typedef struct { uint8_t  startFlag;     uint16_t delayTimeSec; } CAN_AlarmMsg_t;
 
 /* ===== Clock & alarm ====================================================== */
@@ -147,6 +180,7 @@ SemaphoreHandle_t semaphAlarm;          /* binary : AlarmTask   -> MelodyTask  *
 SemaphoreHandle_t fanSemaph;            /* binary : airQ / SW2  -> MotorTask   */
 QueueHandle_t     rxQueue;              /* CAN RX ISR -> CAN_ReceiverTask      */
 QueueHandle_t     canQueue;             /* SW1 ISR    -> CAN_SendTask          */
+SemaphoreHandle_t canReadySem;          /* CAN initialization complete         */
 
 /* ===== BLE / console ====================================================== */
 uint8_t           RxChar;
@@ -170,8 +204,17 @@ VL53L1_Dev_t tof[2];
 const uint8_t tofAddr[2] = { 0x54, 0x56 };
 
 /* ===== CAN ================================================================ */
-volatile uint16_t   movement = 0;
-volatile uint8_t    quality  = 0;
+volatile uint16_t   sleepMov   [2] = {0, 0};   /* last movement count per board          */
+volatile uint8_t    sleepQual  [2] = {0, 0};   /* last quality per board: 1 good, 0 bad  */
+volatile TickType_t sleepLastRx[2] = {0, 0};   /* tick of the last frame per board       */
+volatile bool       sleepSeen  [2] = {false, false};
+/* Runtime diagnostics: inspect these with the UART command 'q'. */
+volatile uint32_t canRxTotal      = 0;
+volatile uint32_t canRxAccepted   = 0;
+volatile uint32_t canRxRejected   = 0;
+volatile uint32_t canRxQueueDrops = 0;
+volatile uint32_t canTxErrors     = 0;
+volatile uint32_t buzzerStartErrors = 0;
 CAN_TxHeaderTypeDef TxHeader;
 uint8_t             TxData[3];
 uint32_t            TxMailbox;
@@ -248,6 +291,27 @@ const uint8_t sound_lengths[N_SOUNDS] = {
 
 uint8_t sound = 0;                      /* selected melody */
 
+/* ===== Touch keys ========================================================= */
+typedef struct {
+    uint32_t      group_idx;        /* TSC_GROUPx_IDX                    */
+    uint32_t      channel;          /* TSC_GROUPx_IOy  (touch pad)       */
+    uint32_t      sampling;         /* TSC_GROUPx_IOz  (sampling cap)    */
+    GPIO_TypeDef *led_port;
+    uint16_t      led_pin;
+} TouchKey_t;
+
+static const TouchKey_t touchKeys[TOUCH_N_KEYS] = {
+    { TSC_GROUP1_IDX, TSC_GROUP1_IO1, TSC_GROUP1_IO4, GPIOA, GPIO_PIN_7  },  /* PB12 -> LED2 (PA7)  */
+    { TSC_GROUP1_IDX, TSC_GROUP1_IO2, TSC_GROUP1_IO4, GPIOA, GPIO_PIN_10 },  /* PB13 -> LED3 (PA10) */
+    { TSC_GROUP1_IDX, TSC_GROUP1_IO3, TSC_GROUP1_IO4, GPIOC, GPIO_PIN_5  },  /* PB14 -> LED4 (PC5)  */
+};
+
+SemaphoreHandle_t tscSemaph;            /* binary : TSC ISR -> TouchTask */
+volatile uint8_t  touchMask = 0;        /* bit k = key k currently touched */
+
+/* ===== Motor ============================================================== */
+volatile bool    motorManual = false;   /* toggled by SW2: true = potentiometer sets the speed */
+volatile uint8_t motorDuty   = 0;       /* last PWM value applied (debug / OLED)                */
 
 /* USER CODE END PV */
 
@@ -265,6 +329,7 @@ static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_TIM15_Init(void);
+static void MX_TSC_Init(void);
 void StartDefaultTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
@@ -281,6 +346,8 @@ void FadeOutRedTask   (void *pvParameters);
 void CAN_SendTask     (void *pvParameters);
 void CAN_ReceiverTask (void *pvParameters);
 void CAN_SetupFiltersAndStart(void);
+void TouchTask(void *pvParameters);
+static void Touch_LED_Init(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -328,6 +395,7 @@ int main(void)
   MX_TIM2_Init();
   MX_CAN1_Init();
   MX_TIM15_Init();
+  MX_TSC_Init();
   /* USER CODE BEGIN 2 */
 
   RetargetInit(&COM_HANDLE);
@@ -338,6 +406,7 @@ int main(void)
   HAL_ADC_Start_DMA(&hadc1, adc_raw, 2);
   HAL_TIM_Base_Start(&htim15);
 
+  Touch_LED_Init();
 
   /* USER CODE END 2 */
 
@@ -352,6 +421,8 @@ int main(void)
   semaph      = xSemaphoreCreateBinary();
   semaphAlarm = xSemaphoreCreateBinary();
   fanSemaph   = xSemaphoreCreateBinary();
+  tscSemaph = xSemaphoreCreateBinary();
+  canReadySem = xSemaphoreCreateBinary();
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
@@ -360,7 +431,9 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
-  rxQueue  = xQueueCreate(5,  sizeof(CAN_SleepData_t));
+  /* CAN RX task can be briefly delayed by other application tasks.
+   * A deeper queue absorbs bursts without dropping sleep reports. */
+  rxQueue  = xQueueCreate(32, sizeof(CAN_SleepData_t));
   canQueue = xQueueCreate(10, sizeof(CAN_AlarmMsg_t));
   /* USER CODE END RTOS_QUEUES */
 
@@ -381,10 +454,13 @@ int main(void)
       xTaskCreate(MotorTask,         "Motor",      256, NULL, tskIDLE_PRIORITY + 2, NULL);
       xTaskCreate(FadeInBlueTask,    "FadeInBlue", 512, NULL, tskIDLE_PRIORITY + 2, &fadeInBlueTaskHandle);
       xTaskCreate(FadeOutRedTask,    "FadeOutRed", 512, NULL, tskIDLE_PRIORITY + 2, &fadeOutRedTaskHandle);
-      xTaskCreate(CAN_SendTask,      "CAN_TX",     256, NULL, tskIDLE_PRIORITY,     NULL);
-      xTaskCreate(CAN_ReceiverTask,  "CAN_RX",     256, NULL, tskIDLE_PRIORITY,     NULL);
+      xTaskCreate(CAN_SendTask,      "CAN_TX",     256, NULL, tskIDLE_PRIORITY + 1, NULL);
+      /* Must run above background/idle priority to drain FIFO-backed queue promptly. */
+      xTaskCreate(CAN_ReceiverTask,  "CAN_RX",     256, NULL, tskIDLE_PRIORITY + 3, NULL);
+      xTaskCreate(TouchTask, 		 "Touch", 	   640, NULL, tskIDLE_PRIORITY + 1, NULL);
 
-      CAN_SetupFiltersAndStart();
+
+      /* CAN is started by CAN_ReceiverTask after the scheduler is running. */
   /* USER CODE END RTOS_THREADS */
 
   /* Start scheduler */
@@ -546,7 +622,7 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 16;
+  hcan1.Init.Prescaler = CAN_PRESCALER;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
   hcan1.Init.TimeSeg1 = CAN_BS1_13TQ;
@@ -968,6 +1044,51 @@ static void MX_TIM15_Init(void)
 }
 
 /**
+  * @brief TSC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TSC_Init(void)
+{
+
+  /* USER CODE BEGIN TSC_Init 0 */
+
+  /* USER CODE END TSC_Init 0 */
+
+  /* USER CODE BEGIN TSC_Init 1 */
+
+  /* USER CODE END TSC_Init 1 */
+
+  /** Configure the TSC peripheral
+  */
+  htsc.Instance = TSC;
+  htsc.Init.CTPulseHighLength = TSC_CTPH_2CYCLES;
+  htsc.Init.CTPulseLowLength = TSC_CTPL_2CYCLES;
+  htsc.Init.SpreadSpectrum = DISABLE;
+  htsc.Init.SpreadSpectrumDeviation = 1;
+  htsc.Init.SpreadSpectrumPrescaler = TSC_SS_PRESC_DIV1;
+  htsc.Init.PulseGeneratorPrescaler = TSC_PG_PRESC_DIV4;
+  htsc.Init.MaxCountValue = TSC_MCV_16383;
+  htsc.Init.IODefaultMode = TSC_IODEF_OUT_PP_LOW;
+  htsc.Init.SynchroPinPolarity = TSC_SYNC_POLARITY_FALLING;
+  htsc.Init.AcquisitionMode = TSC_ACQ_MODE_NORMAL;
+  htsc.Init.MaxCountInterrupt = ENABLE;
+  htsc.Init.ChannelIOs = TSC_GROUP1_IO1|TSC_GROUP1_IO2|TSC_GROUP1_IO3;
+  htsc.Init.ShieldIOs = 0;
+  htsc.Init.SamplingIOs = TSC_GROUP1_IO4;
+  if (HAL_TSC_Init(&htsc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TSC_Init 2 */
+  HAL_NVIC_SetPriority(TSC_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(TSC_IRQn);
+
+  /* USER CODE END TSC_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -1007,7 +1128,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOH, SHUT1_Pin|SHUT2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LD2_Pin|DIR_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7|DIR_Pin|GPIO_PIN_10, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, DIS_Pin|CE_Pin|CSN_Pin, GPIO_PIN_RESET);
@@ -1025,12 +1149,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LD2_Pin DIR_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin|DIR_Pin;
+  /*Configure GPIO pins : PA7 DIR_Pin PA10 */
+  GPIO_InitStruct.Pin = GPIO_PIN_7|DIR_Pin|GPIO_PIN_10;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PC5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SW2_Pin */
   GPIO_InitStruct.Pin = SW2_Pin;
@@ -1233,10 +1364,29 @@ void uart_task(void *pvParameters)
             break;
         }
 
-        /* ---- sleep quality ---- */
-        case 7:
-            printf("Mouvements = %u\r\nSommeil = %s\r\n", movement, quality == 1 ? "Bon" : "Mauvais");
+        /* ---- sleep summary: show only each board's quality and movement count ---- */
+        case 7: {
+            TickType_t now = xTaskGetTickCount();
+
+            for (uint8_t i = 0; i < SLEEP_N_NODES; i++)
+            {
+                bool fresh = sleepSeen[i] &&
+                    ((now - sleepLastRx[i]) <= pdMS_TO_TICKS(SLEEP_NODE_TIMEOUT_MS));
+
+                if (!fresh)
+                {
+                    printf("NODE %c: quality=NO DATA, movements=--\r\n", (char)('A' + i));
+                }
+                else
+                {
+                    printf("NODE %c: quality=%s, movements=%u\r\n",
+                           (char)('A' + i),
+                           (sleepQual[i] == 1U) ? "GOOD" : "BAD",
+                           (unsigned int)sleepMov[i]);
+                }
+            }
             break;
+        }
 
         default: break;
         }
@@ -1268,9 +1418,7 @@ void temp_task(void *pvParameters)                          /* SPI2, every 1 s *
         HAL_GPIO_WritePin(CE_GPIO_Port,  CE_Pin,  GPIO_PIN_RESET);
 
         uint8_t msb = Temp[0], lsb = Temp[1];
-        if      (lsb & 0x80) fTemperature = (float)msb + 0.50f;
-        else if (lsb & 0x40) fTemperature = (float)msb + 0.25f;
-        else                 fTemperature = (float)msb;
+                fTemperature = (float)(int8_t)msb + (float)((lsb >> 6) & 0x03) * 0.25f;
 
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000));
     }
@@ -1350,7 +1498,12 @@ void AlarmTask(void *pvParameters)
 /* ============================================================================
  *  5. BUZZER (TIM8 CH4, timer clock = 80 MHz / (PSC+1) = 1 MHz)
  * ========================================================================== */
-static void Buzzer_Off(void) { HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_4); }
+static void Buzzer_Off(void)
+{
+    /* Clear duty before stopping so no stale compare value is left for the next start. */
+    __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_4, 0);
+    (void)HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_4);
+}
 
 /* Interruptible delay: false as soon as the alarm leaves RINGING. */
 static bool Buzzer_Wait(uint32_t ms)
@@ -1367,6 +1520,7 @@ static bool Buzzer_Wait(uint32_t ms)
 
 static bool Buzzer_PlayNote(uint32_t freq, uint32_t duration_ms)
 {
+    if (alarm_state != ALARM_RINGING) { Buzzer_Off(); return false; }
     if (freq == 0) { Buzzer_Off(); return Buzzer_Wait(duration_ms); }
 
     uint32_t tim_clk = 80000000UL / (htim8.Init.Prescaler + 1);
@@ -1375,7 +1529,12 @@ static bool Buzzer_PlayNote(uint32_t freq, uint32_t duration_ms)
     __HAL_TIM_SET_AUTORELOAD(&htim8, period);
     __HAL_TIM_SET_COMPARE   (&htim8, TIM_CHANNEL_4, period / 2);
     __HAL_TIM_SET_COUNTER   (&htim8, 0);                    /* [FIX] avoid a 65 ms glitch if CNT > new ARR */
-    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_4);
+    if (HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_4) != HAL_OK)
+    {
+        buzzerStartErrors++;
+        Buzzer_Off();
+        return false;
+    }
 
     bool ok = Buzzer_Wait(duration_ms);
     Buzzer_Off();
@@ -1398,7 +1557,12 @@ void MelodyTask(void *pvParameters)
     for (;;)
     {
         xSemaphoreTake(semaphAlarm, portMAX_DELAY);
-        while (alarm_state == ALARM_RINGING) Buzzer_PlayMelody();
+        while (alarm_state == ALARM_RINGING)
+        {
+            Buzzer_PlayMelody();
+            /* Avoid a tight CPU loop if PWM cannot start on the hardware. */
+            if (alarm_state == ALARM_RINGING) vTaskDelay(pdMS_TO_TICKS(20));
+        }
         Buzzer_Off();
     }
 }
@@ -1518,76 +1682,104 @@ void GestureDetectTask(void *pvParameters)
 }
 
 
-/* ============================================================================
- *  7. FAN + BUTTONS
- *     SW2 : toggle forced fan | SW1 : night mode (red fade-out + CAN message)
- * ========================================================================== */
+/* Temperature -> duty, with start/stop hysteresis. `on` keeps the state. */
+static uint32_t Motor_DutyFromTemp(float t, bool *on)
+{
+    if      (!*on && t >= MOTOR_TEMP_ON_C)                         *on = true;
+    else if ( *on && t <= MOTOR_TEMP_ON_C - MOTOR_TEMP_HYST_C)     *on = false;
+
+    if (!*on) return 0;
+
+    float x = (t - MOTOR_TEMP_ON_C) / (MOTOR_TEMP_FULL_C - MOTOR_TEMP_ON_C);   /* 0..1 */
+    if (x < 0.0f) x = 0.0f;
+    if (x > 1.0f) x = 1.0f;
+
+    return MOTOR_MIN_DUTY + (uint32_t)(x * (float)(MOTOR_PWM_MAX - MOTOR_MIN_DUTY));
+}
+
+/* Potentiometer (12 bit) -> duty. Bottom of the knob = off (dead zone below MIN_DUTY). */
+static uint32_t Motor_DutyFromPot(uint32_t pot12)
+{
+    /* pot12 = 4095U - pot12;   <-- uncomment if the knob turns the wrong way */
+    uint32_t duty = (pot12 * MOTOR_PWM_MAX) / 4095U;
+    return (duty < MOTOR_MIN_DUTY) ? 0U : duty;
+}
+
 void MotorTask(void *pvParameters)
 {
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-    HAL_GPIO_WritePin(DIR_GPIO_Port, DIR_Pin, GPIO_PIN_RESET);
+    bool     tempOn = false;
+    bool     airBad = false;
+    uint32_t potF   = adc_raw[1];               /* low-pass filtered potentiometer */
+    uint32_t last   = 0xFFFFU;                  /* force the first write           */
+
+    HAL_GPIO_WritePin(DIR_GPIO_Port, DIR_Pin, GPIO_PIN_RESET);      /* direction (as the reference) */
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);                       /* started once */
 
     for (;;)
     {
-        xSemaphoreTake(fanSemaph, portMAX_DELAY);
-        bool on = (voc_index_value > 200) || fanForced;
-        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, on ? 200 : 0);
+        /* wakes every 100 ms, or at once when SW2 changes the mode */
+        xSemaphoreTake(fanSemaph, pdMS_TO_TICKS(MOTOR_PERIOD_MS));
+
+        int32_t voc = voc_index_value;
+        float   t   = fTemperature;
+        potF = (potF * 3U + adc_raw[1]) / 4U;
+
+        /* air quality with hysteresis */
+        if      (voc > MOTOR_VOC_BAD) airBad = true;
+        else if (voc < MOTOR_VOC_OK)  airBad = false;
+
+        uint32_t duty;
+        if      (airBad)      duty = MOTOR_PWM_MAX;                 /* 1. bad air  : max speed   */
+        else if (motorManual) duty = Motor_DutyFromPot(potF);       /* 2. manual   : knob        */
+        else                  duty = Motor_DutyFromTemp(t, &tempOn);/* 3. automatic: temperature */
+
+        if (duty != last)
+        {
+            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, duty);
+            motorDuty = (uint8_t)duty;
+            last      = duty;
+        }
     }
 }
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    static TickType_t lastTick = 0;
-    BaseType_t woken = pdFALSE;
 
-    TickType_t now = xTaskGetTickCountFromISR();
-    if ((now - lastTick) < pdMS_TO_TICKS(200)) return;     /* debounce */
-    lastTick = now;
-
-    if (GPIO_Pin == SW2_Pin)
-    {
-        fanForced ^= 1;
-        xSemaphoreGiveFromISR(fanSemaph, &woken);
-    }
-    else if (GPIO_Pin == SW1_Pin)
-    {
-        startFadeOutRed = true;
-
-        uint32_t nowS = horloge.heure * 3600UL + horloge.min * 60UL + horloge.sec;
-        uint32_t almS = alarm_time.hour * 3600UL + alarm_time.minute * 60UL;
-        uint32_t d    = (almS > nowS) ? (almS - nowS) : (almS + 86400UL - nowS);   /* midnight wrap */
-        if (d > 0xFFFF) d = 0xFFFF;                         /* 16-bit field: clamp (~18 h) */
-
-        CAN_AlarmMsg_t msg = { .startFlag = 1, .delayTimeSec = (uint16_t)d };
-        xQueueSendFromISR(canQueue, &msg, &woken);
-
-        if (fadeOutRedTaskHandle) vTaskNotifyGiveFromISR(fadeOutRedTaskHandle, &woken);
-    }
-    portYIELD_FROM_ISR(woken);
-}
 
 
 /* ============================================================================
- *  8. CAN   (TX 0x11: [flag][delay_lo][delay_hi]   RX: [mov_hi][mov_lo][quality])
+ *  8. CAN   (TX 0x11: [flag][delay_lo][delay_hi]
+ *            RX 0x21 / 0x22 (sensor boards): [mov_hi][mov_lo][quality 1=good 0=bad])
  * ========================================================================== */
 void CAN_SetupFiltersAndStart(void)
 {
     CAN_FilterTypeDef f = {0};
+
+    /* A zero mask accepts every ID; the application filters IDs in the callback.
+     * This makes it possible to count unexpected IDs during bus debugging.
+     */
     f.FilterBank           = 0;
     f.FilterMode           = CAN_FILTERMODE_IDMASK;
     f.FilterScale          = CAN_FILTERSCALE_32BIT;
+    f.FilterIdHigh         = 0;
+    f.FilterIdLow          = 0;
+    f.FilterMaskIdHigh     = 0;
+    f.FilterMaskIdLow      = 0;
     f.FilterFIFOAssignment = CAN_FILTER_FIFO0;
     f.FilterActivation     = ENABLE;
-    f.SlaveStartFilterBank = 14;                            /* accept everything */
+    f.SlaveStartFilterBank = 14;
 
-    HAL_CAN_ConfigFilter(&hcan1, &f);
-    HAL_CAN_Start(&hcan1);
-    HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+    if (HAL_CAN_ConfigFilter(&hcan1, &f) != HAL_OK) Error_Handler();
+    if (HAL_CAN_Start(&hcan1) != HAL_OK) Error_Handler();
+    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
+        Error_Handler();
 }
 
 void CAN_SendTask(void *pvParameters)
 {
     CAN_AlarmMsg_t msg;
+
+    /* CAN is initialized by CAN_ReceiverTask after the scheduler starts. */
+    xSemaphoreTake(canReadySem, portMAX_DELAY);
 
     TxHeader.DLC   = 3;
     TxHeader.IDE   = CAN_ID_STD;
@@ -1600,9 +1792,15 @@ void CAN_SendTask(void *pvParameters)
         if (xQueueReceive(canQueue, &msg, portMAX_DELAY) == pdPASS)
         {
             TxData[0] = msg.startFlag;
-            TxData[1] = msg.delayTimeSec & 0xFF;
-            TxData[2] = msg.delayTimeSec >> 8;
-            HAL_CAN_AddTxMessage(&hcan1, &TxHeader, TxData, &TxMailbox);
+            TxData[1] = (uint8_t)(msg.delayTimeSec & 0xFFU);
+            TxData[2] = (uint8_t)(msg.delayTimeSec >> 8);
+
+            /* Wait for a free mailbox instead of silently dropping a queued message. */
+            while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0U)
+                vTaskDelay(pdMS_TO_TICKS(1));
+
+            if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, TxData, &TxMailbox) != HAL_OK)
+                canTxErrors++;
         }
     }
 }
@@ -1610,14 +1808,40 @@ void CAN_SendTask(void *pvParameters)
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
     CAN_RxHeaderTypeDef hdr;
-    uint8_t    d[8];                                        /* full frame size: no overflow */
+    uint8_t d[8];
     BaseType_t woken = pdFALSE;
 
-    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &hdr, d) == HAL_OK && hdr.DLC >= 3)
+    if ((hcan == NULL) || (hcan->Instance != CAN1)) return;
+
+    /* Drain all pending FIFO0 messages so a burst cannot leave the FIFO stuck full. */
+    while (HAL_CAN_GetRxFifoFillLevel(hcan, CAN_RX_FIFO0) > 0U)
     {
-        CAN_SleepData_t r = { (uint16_t)(((uint16_t)d[0] << 8) | d[1]), d[2] };
-        xQueueSendFromISR(rxQueue, &r, &woken);
+        if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &hdr, d) != HAL_OK)
+        {
+            canRxRejected++;
+            break;
+        }
+
+        canRxTotal++;
+
+        if ((hdr.IDE != CAN_ID_STD) || (hdr.RTR != CAN_RTR_DATA) || (hdr.DLC < 3U) ||
+            ((hdr.StdId != CAN_ID_SLEEP_NODE1) && (hdr.StdId != CAN_ID_SLEEP_NODE2)))
+        {
+            canRxRejected++;
+            continue;
+        }
+
+        CAN_SleepData_t r;
+        r.nodeId = (hdr.StdId == CAN_ID_SLEEP_NODE1) ? 0U : 1U;
+        r.movementCount = (uint16_t)(((uint16_t)d[0] << 8) | (uint16_t)d[1]);
+        r.sleepQuality = d[2];
+
+        if ((rxQueue != NULL) && (xQueueSendFromISR(rxQueue, &r, &woken) == pdPASS))
+            canRxAccepted++;
+        else
+            canRxQueueDrops++;
     }
+
     portYIELD_FROM_ISR(woken);
 }
 
@@ -1625,16 +1849,21 @@ void CAN_ReceiverTask(void *pvParameters)
 {
     CAN_SleepData_t r;
 
+    /* Start CAN in task context after FreeRTOS has started, before enabling RX IRQs. */
+    CAN_SetupFiltersAndStart();
+    xSemaphoreGive(canReadySem);
+
     for (;;)
     {
-        if (xQueueReceive(rxQueue, &r, portMAX_DELAY) == pdPASS)
+        if (xQueueReceive(rxQueue, &r, portMAX_DELAY) == pdPASS && r.nodeId < SLEEP_N_NODES)
         {
-            movement = r.movementCount;
-            quality  = r.sleepQuality;
+            sleepMov   [r.nodeId] = r.movementCount;
+            sleepQual  [r.nodeId] = r.sleepQuality;
+            sleepLastRx[r.nodeId] = xTaskGetTickCount();
+            sleepSeen  [r.nodeId] = true;
         }
     }
 }
-
 
 /* ============================================================================
  *  9. WS2812 LEDs (TIM3 CH4 + DMA)  - frame order per LED is G, R, B
@@ -1703,6 +1932,178 @@ void FadeOutRedTask(void *pvParameters)
         startFadeOutRed = false;
     }
 }
+
+/* ============================================================================
+ *  10. TOUCH KEYS (TSC)  ->  GPIO LEDs 2..4
+ *      A TSC group measures ONE pad at a time, so keys are scanned in turn.
+ *      Baseline is calibrated at start-up: DON'T touch the pads while booting.
+ * ========================================================================== */
+static void Touch_LED_Init(void)
+{
+    GPIO_InitTypeDef g = {0};
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+
+    g.Mode  = GPIO_MODE_OUTPUT_PP;
+    g.Pull  = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+
+    for (uint8_t k = 0; k < TOUCH_N_KEYS; k++)
+    {
+        HAL_GPIO_WritePin(touchKeys[k].led_port, touchKeys[k].led_pin, GPIO_PIN_RESET);
+        g.Pin = touchKeys[k].led_pin;
+        HAL_GPIO_Init(touchKeys[k].led_port, &g);
+    }
+}
+
+/* ---- TSC interrupts: wake TouchTask (also on error, so it never hangs) ---- */
+void HAL_TSC_ConvCpltCallback(TSC_HandleTypeDef *htsc_)
+{
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(tscSemaph, &woken);
+    portYIELD_FROM_ISR(woken);
+}
+
+void HAL_TSC_ErrorCallback(TSC_HandleTypeDef *htsc_)
+{
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(tscSemaph, &woken);
+    portYIELD_FROM_ISR(woken);
+}
+
+/* ============================================================================
+ *  10. TOUCH KEYS (TSC)  ->  GPIO LEDs 2..4
+ *      A TSC group measures ONE pad at a time, so keys are scanned in turn.
+ *      A touch adds capacitance, so the acquisition value DROPS.
+ *      Baseline is calibrated at start-up: don't touch the pads while booting.
+ * ========================================================================== */
+typedef enum {
+    TOUCH_OK = 0,
+    TOUCH_ERR_CFG,          /* HAL_TSC_IOConfig failed              */
+    TOUCH_ERR_START,        /* HAL_TSC_Start_IT failed              */
+    TOUCH_ERR_TIMEOUT,      /* no interrupt: NVIC / priority        */
+    TOUCH_ERR_MAXCOUNT      /* counter overflowed: wrong cap / pad  */
+} TouchErr_t;
+
+#if TOUCH_DEBUG
+static void touch_log(const char *fmt, ...)         /* USART2 (ST-Link VCP) */
+{
+    char    buf[96];
+    va_list ap;
+
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    if (n > 0)
+        HAL_UART_Transmit(&huart2, (uint8_t *)buf,
+                          (uint16_t)((n < (int)sizeof buf) ? n : (int)sizeof buf - 1), 100);
+}
+#define TOUCH_LOG(...)  touch_log(__VA_ARGS__)
+#else
+#define TOUCH_LOG(...)  ((void)0)
+#endif
+
+/* ---- One acquisition on key k ---- */
+static TouchErr_t Touch_Read(uint8_t k, uint32_t *value)
+{
+    TSC_IOConfigTypeDef io = {0};
+    io.ChannelIOs  = touchKeys[k].channel;
+    io.SamplingIOs = touchKeys[k].sampling;
+    io.ShieldIOs   = 0;
+
+    if (HAL_TSC_IOConfig(&htsc, &io) != HAL_OK) return TOUCH_ERR_CFG;
+
+    HAL_TSC_IODischarge(&htsc, ENABLE);                     /* discharge pad + sampling cap */
+    vTaskDelay(pdMS_TO_TICKS(1));
+
+    xSemaphoreTake(tscSemaph, 0);                           /* flush a stale give */
+    if (HAL_TSC_Start_IT(&htsc) != HAL_OK) return TOUCH_ERR_START;
+
+    if (xSemaphoreTake(tscSemaph, pdMS_TO_TICKS(50)) != pdTRUE)
+    {
+        HAL_TSC_Stop_IT(&htsc);
+        return TOUCH_ERR_TIMEOUT;
+    }
+    if (HAL_TSC_GroupGetStatus(&htsc, touchKeys[k].group_idx) != TSC_GROUP_COMPLETED)
+        return TOUCH_ERR_MAXCOUNT;
+
+    *value = HAL_TSC_GroupGetValue(&htsc, touchKeys[k].group_idx);
+    return TOUCH_OK;
+}
+
+/* ---- Average of the untouched value (0 if every read failed) ---- */
+static int32_t Touch_Calibrate(uint8_t k)
+{
+    int32_t  sum = 0, n = 0;
+    uint32_t v;
+
+    for (uint8_t i = 0; i < TOUCH_CAL_SAMPLES; i++)
+        if (Touch_Read(k, &v) == TOUCH_OK) { sum += (int32_t)v; n++; }
+
+    return n ? (sum / n) : 0;
+}
+
+/* ---- Hysteresis detector + slow baseline drift tracking ---- */
+static bool Touch_Detect(bool touched, int32_t *base, int32_t val)
+{
+    const int32_t thr_on  = *base * (100 - TOUCH_DELTA_PCT)   / 100;
+    const int32_t thr_off = *base * (100 - TOUCH_RELEASE_PCT) / 100;
+
+    if      (!touched && val < thr_on)  touched = true;
+    else if ( touched && val > thr_off) touched = false;
+
+    if (!touched) *base += (val - *base) / 64;
+    return touched;
+}
+
+static void Touch_SetState(uint8_t k, bool touched)
+{
+    HAL_GPIO_WritePin(touchKeys[k].led_port, touchKeys[k].led_pin,
+                      touched ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+    if (touched) touchMask |=  (1U << k);
+    else         touchMask &= ~(1U << k);
+}
+
+void TouchTask(void *pvParameters)
+{
+    int32_t base[TOUCH_N_KEYS];
+    bool    touched[TOUCH_N_KEYS] = { false };
+
+    vTaskDelay(pdMS_TO_TICKS(200));                         /* let the pads settle */
+
+    for (uint8_t k = 0; k < TOUCH_N_KEYS; k++)
+    {
+        base[k] = Touch_Calibrate(k);
+        TOUCH_LOG("[touch] K%u base=%ld\r\n", k, (long)base[k]);
+    }
+
+    for (;;)
+    {
+        for (uint8_t k = 0; k < TOUCH_N_KEYS; k++)
+        {
+            uint32_t   v;
+            TouchErr_t e = Touch_Read(k, &v);
+
+            if (e != TOUCH_OK)
+            {
+                TOUCH_LOG("[touch] K%u err=%d\r\n", k, (int)e);
+                continue;
+            }
+            if (base[k] == 0)                               /* calibration had failed: retry */
+            {
+                base[k] = (int32_t)v;
+                continue;
+            }
+
+            touched[k] = Touch_Detect(touched[k], &base[k], (int32_t)v);
+            Touch_SetState(k, touched[k]);
+            TOUCH_LOG("K%u v=%lu base=%ld t=%d\r\n", k, (unsigned long)v, (long)base[k], touched[k]);
+        }
+        vTaskDelay(pdMS_TO_TICKS(TOUCH_PERIOD_MS));
+    }
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -1742,6 +2143,37 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE BEGIN Callback 1 */
 
   /* USER CODE END Callback 1 */
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    static TickType_t lastTick = 0;
+    BaseType_t woken = pdFALSE;
+
+    TickType_t now = xTaskGetTickCountFromISR();
+    if ((now - lastTick) < pdMS_TO_TICKS(200)) return;     /* debounce */
+    lastTick = now;
+
+    if (GPIO_Pin == SW2_Pin)
+    {
+        motorManual = !motorManual;                         /* SW2: auto <-> manual (potentiometer) */
+        xSemaphoreGiveFromISR(fanSemaph, &woken);           /* apply the change immediately         */
+    }
+    else if (GPIO_Pin == SW1_Pin)
+    {
+        startFadeOutRed = true;
+
+        uint32_t nowS = horloge.heure * 3600UL + horloge.min * 60UL + horloge.sec;
+        uint32_t almS = alarm_time.hour * 3600UL + alarm_time.minute * 60UL;
+        uint32_t d    = (almS > nowS) ? (almS - nowS) : (almS + 86400UL - nowS);   /* midnight wrap */
+        if (d > 0xFFFF) d = 0xFFFF;                         /* 16-bit field: clamp (~18 h) */
+
+        CAN_AlarmMsg_t msg = { .startFlag = 1, .delayTimeSec = (uint16_t)d };
+        xQueueSendFromISR(canQueue, &msg, &woken);
+
+        if (fadeOutRedTaskHandle) vTaskNotifyGiveFromISR(fadeOutRedTaskHandle, &woken);
+    }
+    portYIELD_FROM_ISR(woken);
 }
 
 /**
